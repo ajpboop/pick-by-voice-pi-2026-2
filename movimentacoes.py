@@ -27,6 +27,7 @@ MAPEAMENTO_ENDERECOS = {
     ("B", 2, 1): (6, 1),
 }
 
+
 def obter_coordenada_produto(corredor, prateleira, lugar):
     chave = (corredor, prateleira, lugar)
     if chave in MAPEAMENTO_ENDERECOS:
@@ -112,7 +113,6 @@ def a_star(grid, inicio, destino):
 # ==========================================
 
 def calcular_distancia_caminho(grid, inicio, destino, cache_distancias):
-    """Calcula a distância via A* reaproveitando resultados calculados."""
     par = (inicio, destino)
     if par in cache_distancias:
         return cache_distancias[par]
@@ -124,10 +124,6 @@ def calcular_distancia_caminho(grid, inicio, destino, cache_distancias):
 
 
 def otimizar_ordem_coleta(pos_inicial, lista_itens, grid):
-    """
-    Encontra a sequência exata de produtos que minimiza o trajeto total percorrido.
-    'lista_itens' contém dicionários com informações do produto e suas coordenadas.
-    """
     if len(lista_itens) <= 1:
         return lista_itens
 
@@ -135,7 +131,6 @@ def otimizar_ordem_coleta(pos_inicial, lista_itens, grid):
     melhor_sequencia = None
     menor_distancia_total = float('inf')
 
-    # Testa todas as permutações possíveis da ordem de coleta (Ideal para ordens de picking de até 8-10 itens)
     for permutacao in itertools.permutations(lista_itens):
         distancia_atual = 0
         ponto_atual = pos_inicial
@@ -153,42 +148,116 @@ def otimizar_ordem_coleta(pos_inicial, lista_itens, grid):
 
 
 # ==========================================
-# 4. INSTRUÇÕES DE VOZ E COMUNICAÇÃO
+# 4. INSTRUÇÕES DE VOZ E NAVEGAÇÃO RELATIVA
 # ==========================================
 
-def gerar_instrucoes_voz(caminho, direcao_inicial="NORTE"):
-    if not caminho or len(caminho) < 2:
-        return ["Você já está no local do produto."], direcao_inicial
+CARDINAIS = ["NORTE", "LESTE", "SUL", "OESTE"]
 
-    vetores_direcao = {
-        (0, -1): "NORTE",
-        (0, 1): "SUL",
-        (1, 0): "LESTE",
-        (-1, 0): "OESTE"
-    }
+VETORES_DIRECAO = {
+    (0, -1): "NORTE",
+    (1, 0): "LESTE",
+    (0, 1): "SUL",
+    (-1, 0): "OESTE"
+}
+
+DIRECAO_PARA_VETOR = {v: k for k, v in VETORES_DIRECAO.items()}
+
+
+def obter_giro_relativo(direcao_atual, proxima_direcao):
+    """Calcula se o operador deve virar à esquerda, direita ou fazer meia-volta."""
+    if direcao_atual == proxima_direcao:
+        return None
+
+    idx_atual = CARDINAIS.index(direcao_atual)
+    idx_prox = CARDINAIS.index(proxima_direcao)
+
+    diff = (idx_prox - idx_atual) % 4
+
+    if diff == 1:
+        return "Vire à direita"
+    elif diff == 2:
+        return "Faça meia-volta"
+    elif diff == 3:
+        return "Vire à esquerda"
+    return None
+
+
+def identificar_lado_destino(grid, pos_final, direcao_final, coord_prateleira=None):
+    """
+    Identifica se a prateleira/produto está à esquerda ou à direita do operador
+    com base na direção para a qual ele está olhando ao chegar.
+    """
+    dx_f, dy_f = DIRECAO_PARA_VETOR[direcao_final]
+
+    vetor_esquerda = (dy_f, -dx_f)
+    vetor_direita = (-dy_f, dx_f)
+
+    if coord_prateleira and coord_prateleira != pos_final:
+        rel_x = coord_prateleira[0] - pos_final[0]
+        rel_y = coord_prateleira[1] - pos_final[1]
+
+        if (rel_x, rel_y) == vetor_esquerda:
+            return "ao seu lado esquerdo"
+        elif (rel_x, rel_y) == vetor_direita:
+            return "ao seu lado direito"
+        elif (rel_x, rel_y) == (dx_f, dy_f):
+            return "à sua frente"
+
+    x, y = pos_final
+    linhas, colunas = len(grid), len(grid[0])
+
+    x_esq, y_esq = x + vetor_esquerda[0], y + vetor_esquerda[1]
+    x_dir, y_dir = x + vetor_direita[0], y + vetor_direita[1]
+
+    tem_prateleira_esq = (0 <= y_esq < linhas and 0 <= x_esq < colunas and grid[y_esq][x_esq] == 1)
+    tem_prateleira_dir = (0 <= y_dir < linhas and 0 <= x_dir < colunas and grid[y_dir][x_dir] == 1)
+
+    if tem_prateleira_esq and not tem_prateleira_dir:
+        return "ao seu lado esquerdo"
+    elif tem_prateleira_dir and not tem_prateleira_esq:
+        return "ao seu lado direito"
+
+    return "no seu destino"
+
+
+def gerar_instrucoes_voz(caminho, direcao_inicial="SUL", grid=None, coord_prateleira=None):
+    """Gera comandos de voz dinâmicos e relativos ao olhar do operador."""
+    if not caminho or len(caminho) < 2:
+        instrucao_final = "Você já está no local do produto."
+        if grid and caminho:
+            lado = identificar_lado_destino(grid, caminho[0], direcao_inicial, coord_prateleira)
+            instrucao_final += f" Ele está {lado}."
+        return [instrucao_final], direcao_inicial
 
     instrucoes = []
-    direcao_atual = direcao_inicial
+    direcao_atual = direcao_inicial.upper()
     passos_frente = 0
 
     for i in range(len(caminho) - 1):
         p1, p2 = caminho[i], caminho[i + 1]
         dx, dy = p2[0] - p1[0], p2[1] - p1[1]
 
-        proxima_direcao = vetores_direcao.get((dx, dy), direcao_atual)
+        proxima_direcao = VETORES_DIRECAO.get((dx, dy), direcao_atual)
 
-        if proxima_direcao == direcao_atual:
-            passos_frente += 1
-        else:
+        if proxima_direcao != direcao_atual:
             if passos_frente > 0:
                 instrucoes.append(f"Siga em frente por {passos_frente} metros.")
                 passos_frente = 0
-            instrucoes.append(f"Vire em direção ao {proxima_direcao}.")
+
+            comando_giro = obter_giro_relativo(direcao_atual, proxima_direcao)
+            if comando_giro:
+                instrucoes.append(f"{comando_giro}.")
+
             direcao_atual = proxima_direcao
-            passos_frente += 1
+
+        passos_frente += 1
 
     if passos_frente > 0:
         instrucoes.append(f"Siga em frente por {passos_frente} metros.")
+
+    if grid:
+        lado = identificar_lado_destino(grid, caminho[-1], direcao_atual, coord_prateleira)
+        instrucoes.append(f"O produto está {lado}.")
 
     return instrucoes, direcao_atual
 
@@ -267,7 +336,6 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
 
     itens_otimizados = otimizar_ordem_coleta(posicao_inicial, itens, MAPA_ARMAZEM)
 
-    # Confirma a rota inteira antes de orientar o operador ou registrar coleta.
     rota = []
     posicao_atual = posicao_inicial
     for item in itens_otimizados:
@@ -307,7 +375,9 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
     direcao_atual = direcao_inicial
 
     for index, (item, caminho) in enumerate(rota, 1):
-        instrucoes, direcao_atual = gerar_instrucoes_voz(caminho, direcao_atual)
+        instrucoes, direcao_atual = gerar_instrucoes_voz(
+            caminho, direcao_atual, grid=MAPA_ARMAZEM, coord_prateleira=item["coord"]
+        )
         comunicar_operador(
             f"Item {index} de {len(rota)}: corredor {item['loc']['corredor']}, "
             f"prateleira {item['loc']['prateleira']}, posição {item['loc']['lugar']}."
