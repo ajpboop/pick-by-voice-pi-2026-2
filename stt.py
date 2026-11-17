@@ -1,6 +1,6 @@
 import speech_recognition as sr
 
-def ouvir():
+def ouvir(phrase_time_limit=None):
     """
     Ativa o microfone, escuta o operador e retorna o texto reconhecido.
     """
@@ -12,7 +12,7 @@ def ouvir():
         recognizer.adjust_for_ambient_noise(source, duration=1)
         
         print("Pode falar...")
-        audio = recognizer.listen(source)
+        audio = recognizer.listen(source, phrase_time_limit=phrase_time_limit)
         
     try:
         # Usa o reconhecedor do Google (requer internet)

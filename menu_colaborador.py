@@ -1,7 +1,13 @@
 import customtkinter as ctk
+import threading
+import banco
 import visualizar_pedidos
+from logout import eh_comando_encerrar, eh_confirmacao, eh_confirmar_saida
+from stt import ouvir
+from tts import falar
 
-def abrir_menu_colab(usuario):
+
+def abrir_menu_colab(usuario, colaborador_id):
     janela_menu = ctk.CTk()
     janela_menu.title("Painel do Colaborador")
     janela_menu.geometry("500x400")
@@ -24,7 +30,10 @@ def abrir_menu_colab(usuario):
     subtitulo.pack(pady=(0, 40))
 
     def abrir_selecao():
-        visualizar_pedidos.abrir_tela_pedidos_colab(janela_menu, usuario)  # Passa o usuário para a função
+        visualizar_pedidos.abrir_tela_pedidos_colab(
+            janela_menu, usuario, colaborador_id,
+            fazer_logout_sem_registro, iniciar_encerramento_por_voz
+        )
 
     ctk.CTkButton(
         frame_central, 
@@ -36,9 +45,88 @@ def abrir_menu_colab(usuario):
     
     # --- NOVA FUNÇÃO PARA TROCAR USUÁRIO ---
     def fazer_logout():
+        pedidos_em_andamento = banco.listar_pedidos_em_andamento(colaborador_id)
+        if pedidos_em_andamento:
+            for pedido_id in pedidos_em_andamento:
+                banco.registrar_encerramento_sessao(colaborador_id, pedido_id)
+        else:
+            banco.registrar_encerramento_sessao(colaborador_id)
+        fazer_logout_sem_registro()
+
+    def fazer_logout_sem_registro():
         janela_menu.destroy() # Fecha a tela do colaborador
         import login
         login.abrir_login() # Abre a tela de login novamente
+
+    encerramento_em_andamento = {"ativo": False}
+
+    def encerrar_por_voz(botao, status):
+        encerrada = False
+        try:
+            falar("Diga sair ou logout para solicitar o encerramento da sessão.")
+            comando = ouvir(phrase_time_limit=5)
+            if not comando or not eh_comando_encerrar(comando):
+                janela_menu.after(
+                    0,
+                    lambda: status.configure(
+                        text="Comando não reconhecido. Tente novamente.",
+                        text_color="#e74c3c"
+                    )
+                )
+                return
+
+            pedidos_em_andamento = banco.listar_pedidos_em_andamento(colaborador_id)
+            if pedidos_em_andamento:
+                falar("Pausar pedido? Diga sim ou ok.")
+                confirmacao = ouvir(phrase_time_limit=5)
+                if not confirmacao or not eh_confirmacao(confirmacao):
+                    janela_menu.after(
+                        0,
+                        lambda: status.configure(
+                            text="Pedido mantido. Sessão não encerrada.",
+                            text_color="#f39c12"
+                        )
+                    )
+                    return
+
+                for pedido_id in pedidos_em_andamento:
+                    banco.registrar_encerramento_sessao(
+                        colaborador_id, pedido_id
+                    )
+            else:
+                falar("Confirme a saída dizendo confirmar.")
+                confirmacao = ouvir(phrase_time_limit=5)
+                if not confirmacao or not eh_confirmar_saida(confirmacao):
+                    janela_menu.after(
+                        0,
+                        lambda: status.configure(
+                            text="Saída cancelada.",
+                            text_color="#f39c12"
+                        )
+                    )
+                    return
+
+                banco.registrar_encerramento_sessao(colaborador_id)
+
+            encerrada = True
+            janela_menu.after(0, fazer_logout_sem_registro)
+        finally:
+            if not encerrada:
+                def reativar_botao():
+                    encerramento_em_andamento["ativo"] = False
+                    if botao.winfo_exists():
+                        botao.configure(state="normal")
+
+                janela_menu.after(0, reativar_botao)
+
+    def iniciar_encerramento_por_voz(botao, status):
+        if encerramento_em_andamento["ativo"]:
+            return
+        encerramento_em_andamento["ativo"] = True
+        botao.configure(state="disabled")
+        threading.Thread(
+            target=encerrar_por_voz, args=(botao, status), daemon=True
+        ).start()
 
     # Botão atualizado para fazer o logout e voltar ao login
     ctk.CTkButton(

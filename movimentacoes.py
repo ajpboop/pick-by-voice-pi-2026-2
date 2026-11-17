@@ -3,6 +3,7 @@ import itertools
 import time
 
 import banco
+from logout import eh_comando_encerrar, eh_confirmacao, eh_recusa
 from stt import ouvir
 from tts import falar
 
@@ -279,12 +280,16 @@ def coordenada_transitavel(grid, coordenada):
 # 5. EXECUÇÃO DINÂMICA DE MOVIMENTAÇÃO
 # ==========================================
 
-def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(0, 0), direcao_inicial="SUL"):
+def executar_picking_dinamico(
+    numero_pedido, nome_colaborador, posicao_inicial=(0, 0),
+    direcao_inicial="SUL", colaborador_id=None
+):
     conexao = banco.conectar()
     try:
         cursor = conexao.cursor()
         cursor.execute("""
             SELECT i.id, prod.id, prod.nome, i.quantidade,
+                   COALESCE(i.qtd_conferida, 0),
                    prod.corredor, prod.prateleira, prod.lugar
             FROM itens_pedido i
             JOIN produtos prod ON prod.id = i.produto_id
@@ -303,7 +308,10 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
         return
 
     itens = []
-    for item_id, produto_id, nome, quantidade, corredor, prateleira, lugar in linhas:
+    for item_id, produto_id, nome, quantidade, qtd_conferida, corredor, prateleira, lugar in linhas:
+        if qtd_conferida >= quantidade:
+            continue
+
         if corredor is None or prateleira is None or lugar is None:
             comunicar_operador(f"O produto {nome} não tem endereço completo cadastrado.")
             return
@@ -348,8 +356,36 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
         rota.append((item, caminho))
         posicao_atual = item["coord"]
 
+    if colaborador_id is not None and not banco.iniciar_pedido(
+        numero_pedido, colaborador_id, nome_colaborador
+    ):
+        comunicar_operador("Esta ordem já está em andamento para outro colaborador.")
+        return "indisponivel"
+
     palavras_repetir = ("repete", "repetir", "de novo", "novamente", "repita")
     palavras_confirmar = ("confirmar", "ok", "feito", "pronto", "certo", "concluído")
+
+    def confirmar_encerramento():
+        pergunta = "Pausar pedido? Diga sim ou ok. Para continuar, diga não."
+        comunicar_operador(pergunta)
+        while True:
+            resposta = ouvir()
+            if not resposta:
+                time.sleep(0.5)
+                continue
+            if eh_confirmacao(resposta):
+                if colaborador_id is not None:
+                    banco.registrar_encerramento_sessao(
+                        colaborador_id, numero_pedido
+                    )
+                comunicar_operador(
+                    "Pedido pausado. Progresso salvo. Sessão encerrada com sucesso."
+                )
+                return True
+            if eh_recusa(resposta):
+                comunicar_operador("Continuando o pedido.")
+                return False
+            comunicar_operador(pergunta)
 
     def aguardar_confirmacao(instrucao, mensagem_erro, quantidade=None):
         comunicar_operador(instrucao)
@@ -360,12 +396,17 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
                 continue
 
             resposta = resposta.lower()
-            if any(palavra in resposta for palavra in palavras_repetir):
+            if eh_comando_encerrar(resposta):
+                if confirmar_encerramento():
+                    return "sessao_encerrada"
+                comunicar_operador(instrucao)
+                continue
+            elif any(palavra in resposta for palavra in palavras_repetir):
                 comunicar_operador(instrucao)
             elif any(palavra in resposta for palavra in palavras_confirmar):
-                return
+                return True
             elif quantidade is not None and str(quantidade) in resposta:
-                return
+                return True
             else:
                 comunicar_operador(mensagem_erro)
 
@@ -385,17 +426,21 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
         for comando in instrucoes:
             comunicar_operador(comando)
 
-        aguardar_confirmacao(
+        confirmado = aguardar_confirmacao(
             "Diga pronto quando chegar ao local ou diga repetir para ouvir novamente.",
             "Não entendi. Diga pronto ao chegar ou repetir.",
         )
+        if confirmado == "sessao_encerrada":
+            return confirmado
 
         instrucao_item = f"Separe {item['quantidade']} unidades do produto {item['nome']}."
-        aguardar_confirmacao(
+        confirmado = aguardar_confirmacao(
             instrucao_item,
             "Não validado. Diga a quantidade, feito ou repetir.",
             quantidade=item["quantidade"],
         )
+        if confirmado == "sessao_encerrada":
+            return confirmado
 
         conexao = banco.conectar()
         try:
@@ -410,8 +455,11 @@ def executar_picking_dinamico(numero_pedido, nome_colaborador, posicao_inicial=(
         finally:
             conexao.close()
 
-    banco.concluir_pedido_e_atualizar_estoque(numero_pedido, nome_colaborador)
+    banco.concluir_pedido_e_atualizar_estoque(
+        numero_pedido, nome_colaborador, colaborador_id
+    )
     comunicar_operador(f"Ordem {numero_pedido} separada e finalizada com sucesso.")
+    return "concluida"
 
 
 if __name__ == "__main__":

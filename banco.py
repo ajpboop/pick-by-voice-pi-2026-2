@@ -23,6 +23,22 @@ def criar_tabelas():
     for coluna in novas_colunas_pedidos:
         try: cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {coluna}")
         except sqlite3.OperationalError: pass
+    colunas_pedidos = {
+        linha[1] for linha in cursor.execute("PRAGMA table_info(pedidos)").fetchall()
+    }
+    if "colaborador_id" not in colunas_pedidos:
+        cursor.execute("ALTER TABLE pedidos ADD COLUMN colaborador_id INTEGER")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sessoes_colaborador (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            colaborador_id INTEGER NOT NULL,
+            pedido_id INTEGER,
+            encerrada_em TEXT NOT NULL,
+            FOREIGN KEY (colaborador_id) REFERENCES usuarios (id),
+            FOREIGN KEY (pedido_id) REFERENCES pedidos (id)
+        )
+    """)
 
     # ---------------------------------------------------------
     # 2. ATUALIZAÇÕES DA TABELA DE PRODUTOS
@@ -105,21 +121,95 @@ def atualizar_quantidade_estoque(produto_id, quantidade_adicionada):
     conn.commit()
     conn.close()
 
-def concluir_pedido_e_atualizar_estoque(pedido_id, nome_colaborador="Não Informado"):
+def iniciar_pedido(pedido_id, colaborador_id, nome_colaborador):
     conn = conectar()
-    cursor = conn.cursor()
     try:
-        cursor.execute("UPDATE pedidos SET status = 'Concluído', data_conclusao = datetime('now', 'localtime'), colaborador = ? WHERE id = ?", (nome_colaborador, pedido_id))
-        
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("""
+            SELECT 1 FROM pedidos
+            WHERE status = 'Em Andamento' AND colaborador_id = ? AND id != ?
+            LIMIT 1
+        """, (colaborador_id, pedido_id))
+        if cursor.fetchone():
+            conn.commit()
+            return False
+
+        cursor.execute("""
+            UPDATE pedidos
+            SET status = 'Em Andamento', colaborador = ?, colaborador_id = ?
+            WHERE id = ?
+              AND (status = 'Aberto' OR (status = 'Em Andamento' AND colaborador_id = ?))
+        """, (nome_colaborador, colaborador_id, pedido_id, colaborador_id))
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def listar_pedidos_em_andamento(colaborador_id):
+    conn = conectar()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id FROM pedidos
+            WHERE status = 'Em Andamento' AND colaborador_id = ?
+            ORDER BY id
+        """, (colaborador_id,))
+        return [linha[0] for linha in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def registrar_encerramento_sessao(colaborador_id, pedido_id=None):
+    conn = conectar()
+    try:
+        conn.execute("""
+            INSERT INTO sessoes_colaborador (colaborador_id, pedido_id, encerrada_em)
+            VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime'))
+        """, (colaborador_id, pedido_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def concluir_pedido_e_atualizar_estoque(
+    pedido_id, nome_colaborador="Não Informado", colaborador_id=None
+):
+    conn = conectar()
+    try:
+        cursor = conn.cursor()
+        if colaborador_id is None:
+            cursor.execute("""
+                UPDATE pedidos
+                SET status = 'Concluído',
+                    data_conclusao = datetime('now', 'localtime'),
+                    colaborador = ?
+                WHERE id = ? AND status IN ('Aberto', 'Em Andamento')
+            """, (nome_colaborador, pedido_id))
+        else:
+            cursor.execute("""
+                UPDATE pedidos
+                SET status = 'Concluído',
+                    data_conclusao = datetime('now', 'localtime'),
+                    colaborador = ?
+                WHERE id = ? AND status = 'Em Andamento' AND colaborador_id = ?
+            """, (nome_colaborador, pedido_id, colaborador_id))
+
+        if cursor.rowcount != 1:
+            raise RuntimeError(f"A ordem {pedido_id} não está em andamento para este colaborador.")
+
         cursor.execute("SELECT produto_id, quantidade FROM itens_pedido WHERE pedido_id = ?", (pedido_id,))
         itens = cursor.fetchall()
-        
         for produto_id, quantidade_separada in itens:
-            cursor.execute("UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?", (quantidade_separada, produto_id))
-            
+            cursor.execute(
+                "UPDATE produtos SET quantidade = quantidade - ? WHERE id = ?",
+                (quantidade_separada, produto_id)
+            )
         conn.commit()
-    except Exception as e:
-        print(f"Erro ao atualizar estoque: {e}")
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

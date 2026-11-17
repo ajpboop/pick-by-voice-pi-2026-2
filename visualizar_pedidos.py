@@ -127,7 +127,10 @@ def abrir_tela_pedidos_admin(frame_pai):
 # =======================================================================
 # VISÃO DO COLABORADOR: Ordens em Aberto
 # =======================================================================
-def abrir_tela_pedidos_colab(janela_pai, usuario):
+def abrir_tela_pedidos_colab(
+    janela_pai, usuario, colaborador_id=None, ao_encerrar=None,
+    solicitar_encerramento=None
+):
     janela_pedidos = ctk.CTkToplevel(janela_pai)
     janela_pedidos.title("Ordens em Aberto")
     janela_pedidos.geometry("600x400")
@@ -138,19 +141,41 @@ def abrir_tela_pedidos_colab(janela_pai, usuario):
     frame_tabela = ctk.CTkFrame(janela_pedidos, fg_color="transparent")
     frame_tabela.pack(fill="both", expand=True, padx=20, pady=10)
 
-    colunas = ("Ordem", "Data de Criação")
+    colunas = ("Ordem", "Data de Criação", "Status")
     tabela_abertos = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
 
     for col in colunas:
         tabela_abertos.heading(col, text=col)
 
     tabela_abertos.column("Ordem", width=150, anchor="center")
-    tabela_abertos.column("Data de Criação", width=350, anchor="center")
+    tabela_abertos.column("Data de Criação", width=280, anchor="center")
+    tabela_abertos.column("Status", width=140, anchor="center")
     tabela_abertos.pack(fill="both", expand=True)
 
     conn = banco.conectar()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, data_criacao FROM pedidos WHERE status = 'Aberto' ORDER BY id ASC")
+    if colaborador_id is None:
+        cursor.execute("""
+            SELECT id, data_criacao, status
+            FROM pedidos
+            WHERE status = 'Aberto'
+            ORDER BY id ASC
+        """)
+    else:
+        cursor.execute("""
+            SELECT id, data_criacao, status
+            FROM pedidos
+            WHERE status = 'Em Andamento' AND colaborador_id = ?
+               OR (
+                   status = 'Aberto'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM pedidos AS em_andamento
+                       WHERE em_andamento.status = 'Em Andamento'
+                         AND em_andamento.colaborador_id = ?
+                   )
+               )
+            ORDER BY id ASC
+        """, (colaborador_id, colaborador_id))
     for linha in cursor.fetchall():
         tabela_abertos.insert("", tk.END, values=linha)
     conn.close()
@@ -163,9 +188,48 @@ def abrir_tela_pedidos_colab(janela_pai, usuario):
         
         pedido_id = tabela_abertos.item(selecionado[0], 'values')[0]
         janela_pedidos.destroy() 
-        
-        thread_voz = threading.Thread(target=executar_picking_dinamico, args=(pedido_id, usuario))
+
+        def executar_separacao():
+            resultado = executar_picking_dinamico(
+                pedido_id, usuario, colaborador_id=colaborador_id
+            )
+            if resultado == "sessao_encerrada" and ao_encerrar:
+                janela_pai.after(0, ao_encerrar)
+            elif resultado == "indisponivel":
+                janela_pai.after(
+                    0,
+                    lambda: messagebox.showwarning(
+                        "Ordem indisponível",
+                        "Esta ordem já está em andamento para outro colaborador."
+                    )
+                )
+                janela_pai.after(
+                    0,
+                    lambda: abrir_tela_pedidos_colab(
+                        janela_pai, usuario, colaborador_id,
+                        ao_encerrar, solicitar_encerramento
+                    )
+                )
+
+        thread_voz = threading.Thread(target=executar_separacao)
         thread_voz.start()
 
-    ctk.CTkButton(janela_pedidos, text="INICIAR VOICE PICKING DA ORDEM", font=("Arial", 14, "bold"), 
+    ctk.CTkButton(janela_pedidos, text="INICIAR / RETOMAR ORDEM", font=("Arial", 14, "bold"), 
                   height=40, fg_color="#2c7a3f", hover_color="#1f5a2d", command=iniciar_separacao).pack(pady=20, padx=20, fill="x")
+
+    if solicitar_encerramento:
+        status_encerramento = ctk.CTkLabel(janela_pedidos, text="", font=("Arial", 12))
+        status_encerramento.pack(pady=(0, 5))
+
+        botao_encerrar = ctk.CTkButton(
+            janela_pedidos,
+            text="ENCERRAR SESSÃO POR VOZ",
+            font=("Arial", 12, "bold"),
+            height=36,
+            fg_color="#a33535",
+            hover_color="#7a2828",
+            command=lambda: solicitar_encerramento(
+                botao_encerrar, status_encerramento
+            )
+        )
+        botao_encerrar.pack(pady=(0, 15), padx=20, fill="x")

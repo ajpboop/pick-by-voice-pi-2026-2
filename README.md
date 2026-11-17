@@ -119,6 +119,8 @@ A tela de gerenciamento de usuários ainda não foi implementada. Para criar um 
 
 O nome de usuário deve ser gravado em minúsculas, pois o login converte o que é digitado para minúsculas.
 
+No acesso por voz, o colaborador pode falar apenas sua senha numérica. Cada colaborador precisa ter uma senha numérica diferente; senhas repetidas não identificam a conta. Administradores continuam usando usuário e senha por voz.
+
 ## Como usar
 
 1. Entre como administrador e cadastre os produtos em **Cadastrar Produto**.
@@ -127,6 +129,8 @@ O nome de usuário deve ser gravado em minúsculas, pois o login converte o que 
 4. Clique em **Ver Pedidos e Iniciar Separação**, selecione um pedido e clique em **Iniciar Voice Picking do Pedido**.
 5. Ouça a instrução, recolha o item e diga **"confirmar"**. O sistema repete o processo para cada item.
 6. Ao terminar, o pedido é marcado como concluído, o estoque é baixado e ele aparece em **Histórico** no painel do administrador.
+7. Para encerrar a sessão sem um pedido em andamento, use **ENCERRAR SESSÃO POR VOZ**, diga **"sair"** ou **"logout"** e confirme dizendo **"confirmar"**. O encerramento registra o colaborador e o horário.
+8. Durante uma separação, diga **"sair"**, **"logout"**, **"encerrar"**, **"parar"** ou **"terminar"** quando o sistema estiver aguardando uma confirmação. Diga **"sim"** ou **"ok"** para pausar e encerrar a sessão; diga **"não"** para continuar. O pedido fica **Em Andamento**, sem baixar o estoque. No próximo login, ele aparece para retomada e os itens já validados são pulados.
 
 ## Estrutura do projeto
 
@@ -145,6 +149,7 @@ O nome de usuário deve ser gravado em minúsculas, pois o login converte o que 
 | `teste_picking.py` | Fluxo da separação por voz |
 | `tts.py` | Texto para fala (VoiceRSS, cache, voz offline e envio de áudio ao navegador) |
 | `audio_port.py` | Canal HTTP privado para ouvir as instruções no navegador |
+| `logout.py` | Reconhecimento de comandos de encerramento e confirmação por voz |
 | `stt.py` | Fala para texto |
 | `movimentacoes.py` | Mapa do armazém e algoritmo A* para otimizar rotas de separação |
 | `requirements.txt` | Dependências Python |
@@ -154,8 +159,9 @@ O nome de usuário deve ser gravado em minúsculas, pois o login converte o que 
 
 - `usuarios` — nome, senha, perfil (`Administrador` ou `Colaborador`)
 - `produtos` — nome, quantidade, quantidade mínima, preço
-- `pedidos` — status (`Aberto` / `Concluído`), data de criação, data de conclusão, colaborador
+- `pedidos` — status (`Aberto` / `Em Andamento` / `Concluído`), datas, colaborador e checkpoint da separação
 - `itens_pedido` — produto e quantidade de cada item de um pedido
+- `sessoes_colaborador` — ID do colaborador, pedido pausado (quando houver) e horário local do encerramento
 
 ## Solução de problemas
 
