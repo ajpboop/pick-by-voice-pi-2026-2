@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import customtkinter as ctk
 import banco
 import threading
-from teste_picking import iniciar_separacao_por_voz
+from movimentacoes import executar_picking_dinamico
 
 # =======================================================================
 # VISÃO DO ADMINISTRADOR: Consultar Ordens de Saída
@@ -164,7 +164,7 @@ def abrir_tela_pedidos_colab(janela_pai, usuario):
         pedido_id = tabela_abertos.item(selecionado[0], 'values')[0]
         janela_pedidos.destroy() 
         
-        thread_voz = threading.Thread(target=iniciar_separacao_por_voz, args=(pedido_id, usuario))
+        thread_voz = threading.Thread(target=executar_picking_dinamico, args=(pedido_id, usuario))
         thread_voz.start()
 
     ctk.CTkButton(janela_pedidos, text="INICIAR VOICE PICKING DA ORDEM", font=("Arial", 14, "bold"), 

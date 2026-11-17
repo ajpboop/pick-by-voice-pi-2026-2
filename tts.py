@@ -1,11 +1,14 @@
 import hashlib
 import io
 import os
+import tempfile
 import urllib.parse
 import urllib.request
 import wave
 
 import pyttsx3
+
+import audio_port
 
 PASTA_PROJETO = os.path.dirname(os.path.abspath(__file__))
 
@@ -75,25 +78,39 @@ def obter_audio(texto, chave):
 
 
 def reproduzir_wav(audio):
-    import pyaudio
+    enviado_para_navegador = audio_port.enviar_audio(audio)
+    try:
+        import pyaudio
+    except ImportError as erro:
+        if not enviado_para_navegador:
+            raise
+        print(f"Aviso: PyAudio indisponivel para reproducao local ({erro}).")
+        return
 
-    with wave.open(io.BytesIO(audio), "rb") as wav:
-        player = pyaudio.PyAudio()
-        try:
-            stream = player.open(
-                format=player.get_format_from_width(wav.getsampwidth()),
-                channels=wav.getnchannels(),
-                rate=wav.getframerate(),
-                output=True,
-            )
-            bloco = wav.readframes(1024)
-            while bloco:
-                stream.write(bloco)
+    try:
+        with wave.open(io.BytesIO(audio), "rb") as wav:
+            player = pyaudio.PyAudio()
+            stream = None
+            try:
+                stream = player.open(
+                    format=player.get_format_from_width(wav.getsampwidth()),
+                    channels=wav.getnchannels(),
+                    rate=wav.getframerate(),
+                    output=True,
+                )
                 bloco = wav.readframes(1024)
-            stream.stop_stream()
-            stream.close()
-        finally:
-            player.terminate()
+                while bloco:
+                    stream.write(bloco)
+                    bloco = wav.readframes(1024)
+            finally:
+                if stream is not None:
+                    stream.stop_stream()
+                    stream.close()
+                player.terminate()
+    except OSError as erro:
+        if not enviado_para_navegador:
+            raise
+        print(f"Aviso: nao foi possivel reproduzir audio localmente ({erro}).")
 
 
 def falar_offline(texto):
@@ -106,14 +123,28 @@ def falar_offline(texto):
     vozes_pt = [v for v in engine.getProperty('voices') if 'pt' in v.id.lower() or 'portug' in v.name.lower() or 'brazil' in v.name.lower()]
     if vozes_pt:
         vozes_br = [v for v in vozes_pt if 'br' in v.id.lower() or 'brazil' in v.name.lower()]
-        engine.setProperty('voice', (vozes_br or vozes_pt)[0].id)
+        vozes_preferidas = vozes_br or vozes_pt
+        indice_voz = 1 if len(vozes_preferidas) > 1 else 0
+        engine.setProperty('voice', vozes_preferidas[indice_voz].id)
 
     # Configurações opcionais de voz (velocidade e volume)
     engine.setProperty('rate', 200) # Velocidade da fala (o padrão é ~200)
     engine.setProperty('volume', 1.0) # Volume de 0.0 a 1.0
 
-    engine.say(texto)
-    engine.runAndWait()
+    if not audio_port.canal_ativo():
+        engine.say(texto)
+        engine.runAndWait()
+        return
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as arquivo_temporario:
+        caminho_audio = arquivo_temporario.name
+    try:
+        engine.save_to_file(texto, caminho_audio)
+        engine.runAndWait()
+        with open(caminho_audio, "rb") as arquivo:
+            reproduzir_wav(arquivo.read())
+    finally:
+        os.unlink(caminho_audio)
 
 
 def falar(texto):

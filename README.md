@@ -101,6 +101,7 @@ Windows:
 .venv\Scripts\python main.py
 ```
 
+
 ## Primeiro acesso
 
 Quando o banco de dados ainda não tem nenhum usuário, o sistema cria automaticamente:
@@ -142,9 +143,10 @@ O nome de usuário deve ser gravado em minúsculas, pois o login converte o que 
 | `entrada_estoque.py` | Entrada de mercadoria no estoque |
 | `historico.py` | Histórico de pedidos concluídos |
 | `teste_picking.py` | Fluxo da separação por voz |
-| `tts.py` | Texto para fala (VoiceRSS, com cache e voz offline de reserva) |
+| `tts.py` | Texto para fala (VoiceRSS, cache, voz offline e envio de áudio ao navegador) |
+| `audio_port.py` | Canal HTTP privado para ouvir as instruções no navegador |
 | `stt.py` | Fala para texto |
-| `movimentacoes.py` | Reservado para movimentações de estoque (ainda vazio) |
+| `movimentacoes.py` | Mapa do armazém e algoritmo A* para otimizar rotas de separação |
 | `requirements.txt` | Dependências Python |
 | `run.sh` | Atalho para executar no Linux |
 

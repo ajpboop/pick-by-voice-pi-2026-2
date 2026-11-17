@@ -1,3 +1,17 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "remote.portsAttributes": {
+        "6080": {
+            "label": "Voice Picking - VNC",
+            "protocol": "http",
+            "visibility": "private",
+            "onAutoForward": "openBrowser"
+        },
+        "8765": {
+            "label": "Voice Picking - áudio",
+            "protocol": "http",
+            "visibility": "private",
+            "onAutoForward": "openBrowser"
+        }
+    }
 }
